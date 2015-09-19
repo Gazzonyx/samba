@@ -36,6 +36,19 @@ samba_dist.DIST_DIRS('''ctdb:. lib/replace:lib/replace lib/talloc:lib/talloc
                         lib/ccan:lib/ccan libcli/util:libcli/util
                         buildtools:buildtools third_party/waf:third_party/waf''')
 
+manpages = [
+    'ctdb.1',
+    'ctdb.7',
+    'ctdbd.1',
+    'ctdbd.conf.5',
+    'ctdbd_wrapper.1',
+    'ctdb-statistics.7',
+    'ctdb-tunables.7',
+    'ltdbtool.1',
+    'onnode.1',
+    'ping_pong.1'
+]
+
 
 def set_options(opt):
     opt.PRIVATE_EXTENSION_DEFAULT('ctdb')
@@ -356,7 +369,7 @@ def build(bld):
                              ctdb-common-util ctdb-system ctdb-tcp''' +
                           ib_deps,
                      install_path='${SBINDIR}',
-                     manpages='doc/ctdbd.1')
+                     manpages='ctdbd.1')
 
     bld.SAMBA_BINARY('ctdb',
                      source='tools/ctdb.c tools/ctdb_vacuum.c',
@@ -364,14 +377,14 @@ def build(bld):
                              ctdb-system''',
                      includes='include include/internal',
                      install_path='${BINDIR}',
-                     manpages='doc/ctdb.1')
+                     manpages='ctdb.1')
 
     bld.SAMBA_BINARY('ltdbtool',
                      source='tools/ltdbtool.c',
                      includes='include',
                      deps='tdb',
                      install_path='${BINDIR}',
-                     manpages='doc/ltdbtool.1')
+                     manpages='ltdbtool.1')
 
     bld.SAMBA_BINARY('ctdb_lock_helper',
                      source='server/ctdb_lock_helper.c',
@@ -413,7 +426,7 @@ def build(bld):
                      source='utils/ping_pong/ping_pong.c',
                      deps='',
                      install_path='${BINDIR}',
-                     manpages='doc/ping_pong.1')
+                     manpages='ping_pong.1')
 
     if bld.env.HAVE_PMDA:
         bld.SAMBA_BINARY('pmdactdb',
@@ -435,16 +448,52 @@ def build(bld):
         bld.INSTALL_FILES('${CTDB_PMDADIR}', 'utils/pmda/README',
                           destname='README')
 
-    if 'XSLTPROC_MANPAGES' in bld.env and bld.env['XSLTPROC_MANPAGES']:
-        bld.MANPAGES('''doc/onnode.1 doc/ctdbd_wrapper.1 doc/ctdbd.conf.5
-                        doc/ctdb.7 doc/ctdb-statistics.7 doc/ctdb-tunables.7''',
-                     True)
+    sed_expr1 = 's|/usr/local/var/lib/ctdb|%s|g'  % (bld.env.CTDB_VARDIR)
+    sed_expr2 = 's|/usr/local/etc/ctdb|%s|g'      % (bld.env.CTDB_ETCDIR)
+    sed_expr3 = 's|/usr/local/var/log|%s|g'       % (bld.env.CTDB_LOGDIR)
+    sed_expr4 = 's|/usr/local/var/run/ctdb|%s|g'  % (bld.env.CTDB_RUNDIR)
+    sed_expr5 = 's|/usr/local/sbin|%s|g'          % (bld.env.SBINDIR)
+    sed_cmdline = '-e "%s" -e "%s" -e "%s" -e "%s" -e "%s"' % \
+                       (sed_expr1, sed_expr2, sed_expr3, sed_expr4, sed_expr5)
 
-    bld.INSTALL_FILES('${BINDIR}', 'tools/onnode',
+    for f in manpages:
+        x = '%s.xml' % (f)
+        bld.SAMBA_GENERATOR(x,
+                            source=os.path.join('doc', x),
+                            target=x,
+                            rule='sed %s ${SRC} > ${TGT}' % (sed_cmdline))
+
+    if 'XSLTPROC_MANPAGES' in bld.env and bld.env['XSLTPROC_MANPAGES']:
+        bld.MANPAGES('''onnode.1 ctdbd_wrapper.1 ctdbd.conf.5
+                        ctdb.7 ctdb-statistics.7 ctdb-tunables.7''',
+                      True)
+    else:
+        for m in manpages:
+            bld.SAMBA_GENERATOR(m,
+                                source=os.path.join("doc", m),
+                                target=m,
+                                rule='sed %s ${SRC} > ${TGT}' % (sed_cmdline))
+            bld.INSTALL_FILES('${MANDIR}/man%s' % m[-1], m)
+
+    bld.SAMBA_GENERATOR('ctdb-onnode',
+                        source='tools/onnode',
+                        target='onnode',
+                        rule='sed %s ${SRC} > ${TGT}' % (sed_cmdline))
+    bld.INSTALL_FILES('${BINDIR}', 'onnode',
                       destname='onnode', chmod=0755)
-    bld.INSTALL_FILES('${BINDIR}', 'tools/ctdb_diagnostics',
+
+    bld.SAMBA_GENERATOR('ctdb-diagnostics',
+                        source='tools/ctdb_diagnostics',
+                        target='ctdb_diagnostics',
+                        rule='sed %s ${SRC} > ${TGT}' % (sed_cmdline))
+    bld.INSTALL_FILES('${BINDIR}', 'ctdb_diagnostics',
                       destname='ctdb_diagnostics', chmod=0755)
-    bld.INSTALL_FILES('${SBINDIR}', 'config/ctdbd_wrapper',
+
+    bld.SAMBA_GENERATOR('ctdbd-wrapper',
+                        source='config/ctdbd_wrapper',
+                        target='ctdbd_wrapper',
+                        rule='sed %s ${SRC} > ${TGT}' % (sed_cmdline))
+    bld.INSTALL_FILES('${SBINDIR}', 'ctdbd_wrapper',
                       destname='ctdbd_wrapper', chmod=0755)
 
     def SUBDIR_MODE_callback(arg, dirname, fnames):
@@ -478,8 +527,11 @@ def build(bld):
             bld.INSTALL_FILES(bld.env.CTDB_ETCDIR, 'config/%s' % fmode[0],
                               destname=fmode[0], chmod=fmode[1])
 
-    bld.INSTALL_FILES(bld.env.CTDB_ETCDIR, 'config/functions',
-                      destname='functions')
+    bld.SAMBA_GENERATOR('ctdb-functions',
+                        source='config/functions',
+                        target='functions',
+                        rule='sed %s ${SRC} > ${TGT}' % (sed_cmdline))
+    bld.INSTALL_FILES(bld.env.CTDB_ETCDIR, 'functions', destname='functions')
 
     etc_scripts = [
         'ctdb-crash-cleanup.sh',
@@ -495,7 +547,11 @@ def build(bld):
         bld.INSTALL_FILES(bld.env.CTDB_ETCDIR, 'config/%s' % t,
                           destname=t, chmod=0755)
 
-    bld.INSTALL_FILES('${SYSCONFDIR}/sudoers.d', 'config/ctdb.sudoers',
+    bld.SAMBA_GENERATOR('ctdb-sudoers',
+                        source='config/ctdb.sudoers',
+                        target='ctdb.sudoers',
+                        rule='sed %s ${SRC} > ${TGT}' % (sed_cmdline))
+    bld.INSTALL_FILES('${SYSCONFDIR}/sudoers.d', 'ctdb.sudoers',
                       destname='ctdb')
 
     bld.INSTALL_FILES('${CTDB_ETCDIR}/notify.d', 'config/notify.d.README',
@@ -639,6 +695,17 @@ def build(bld):
         bld.symlink_as(os.path.join(test_link_dir, t),
                        os.path.join(bld.env.CTDB_ETCDIR, t))
 
+    # Tests that use onnode need to overwrite link to in-tree
+    # functions file when installed
+    bld.symlink_as(os.path.join(bld.env.CTDB_TEST_DATADIR, 'onnode/functions'),
+                   os.path.join(bld.env.CTDB_ETCDIR, 'functions'))
+    bld.symlink_as(os.path.join(bld.env.CTDB_TEST_DATADIR, 'simple/functions'),
+                   os.path.join(bld.env.CTDB_ETCDIR, 'functions'))
+
+    # Need a link to nodes file because $CTDB_BASE is overridden
+    bld.symlink_as(os.path.join(bld.env.CTDB_TEST_DATADIR, 'simple/nodes'),
+                   os.path.join(bld.env.CTDB_ETCDIR, 'nodes'))
+
 
 def testonly(ctx):
     cmd = 'tests/run_tests.sh -V tests/var'
@@ -688,17 +755,6 @@ def dist():
         print('Command "%s" failed with exit status %d' % (cmd, ret))
         sys.exit(ret)
     samba_dist.DIST_FILES('ctdb/%s:%s' % (t, t), extend=True)
-
-    manpages = [
-        'ctdb.1',
-        'ctdb.7',
-        'ctdbd.1',
-        'ctdbd.conf.5',
-        'ctdbd_wrapper.1',
-        'ctdb-statistics.7',
-        'ctdb-tunables.7',
-        'ltdbtool.1'
-    ]
 
     cmd = 'make -C doc'
     ret = samba_utils.RUN_COMMAND(cmd)
